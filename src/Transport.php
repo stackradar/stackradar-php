@@ -11,5 +11,5 @@ interface Transport
      *
      * @throws TransportException when the report is not accepted
      */
-    public function send(array $payload): void;
+    public function send(string $method, string $path, array $payload, float $timeout = 2.0): void;
 }

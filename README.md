@@ -1,81 +1,78 @@
 # StackRadar PHP SDK
 
-Collect the Composer packages installed in an application and the PHP runtime that observes them. The SDK has no framework dependency and does nothing until `Client::report()` is called.
+Collect installed Composer packages and report PHP runtime observations using StackRadar Runtime Ingest Protocol v1. Requires PHP 8.2+, Composer runtime API 2.1+, and ext-curl. The SDK is inert until explicitly called; use the Laravel integration for lifecycle reporting.
 
-Requires PHP 8.2+, Composer runtime API 2.1+, and ext-curl. This is an unpublished first version; the endpoint and payload contract below are provisional until connected to the ingestion API.
+## Server compatibility
 
-## Usage
+This adapter targets `stackradar/v0` main at `a69ddbb` (2026-11-05). **That server currently accepts only Node/Bun/Deno and npm. It rejects PHP/Composer with HTTP 422, and its snapshot processor handles npm only.** PHP support requires the runtime/ecosystem allowlists and snapshot package identity handling to be extended in v0. This SDK sends truthful `php` / `composer` values and does not bypass the feature toggle.
 
-After the package is published:
+A local check against the actual v0 validator confirmed that `runtime.name` and `packages.ecosystem` are the only rejected fields in a generated PHP report. The actual server hash implementation also matched this SDK for npm, Composer and empty inventories. This is protocol compatibility work, not an end-to-end PHP ingestion release. No production request or feature-toggle change was made.
 
-```bash
-composer require stackradar/php
-```
+The packages remain unpublished. The previous prototype's single full-snapshot POST and `project_token`/`endpoint` configuration have been replaced by the landed protocol.
+
+## Explicit PHP usage
+
+After publishing, install `stackradar/php`. Configure an Ingest Key issued for the Project; no project ID is sent.
 
 ```php
 use StackRadar\Client;
 use StackRadar\HttpTransport;
 
-$client = new Client(
-    environment: 'PROD',
-    transport: new HttpTransport(
-        endpoint: 'https://ingest.example.com/runtime',
-        projectToken: getenv('STACKRADAR_PROJECT_TOKEN'),
-    ),
-);
+$client = new Client(new HttpTransport(
+    ingestKey: getenv('STACKRADAR_INGEST_KEY'),
+));
+$inventory = $client->collectInventory();
 
-$client->report([
-    'instance_id' => 'app-1',
-    'release' => 'deploy-123',
-    'role' => 'web',
-]);
+$context = [
+    'instance' => [
+        'id' => '0192f8c4-7b1e-7c3a-9d2e-4f5a6b7c8d9e', // Your persisted reporter UUID.
+        'started_at' => '2026-11-05T12:00:00Z',
+    ],
+    'deployment' => [
+        'environment' => 'PROD', // null is accepted by the protocol.
+        'service' => 'api',
+        'release' => ['value' => 'deploy-123', 'source' => 'config'],
+        'artifact' => null,
+    ],
+];
+$client->report($context, $inventory);
 ```
 
-Use `stackradar/laravel` for automatic Laravel reporting. The PHP SDK does not create timers, register shutdown handlers, or manage reporting state. The caller chooses the lifecycle and handles exceptions.
+Reuse the inventory and instance identity for later check-ins. Call `collectInventory()` again when the installation changes. The generic SDK does not create timers, caches, shutdown hooks, or disk queues; callers own scheduling and response policy. Pass `null` instead of an inventory, with an optional list of `['code' => '...']` errors, to report collection failure without a partial list.
 
-## Observation and wire format
+## Wire behavior
 
-Each report is a complete JSON snapshot:
+1. POST plain JSON to `https://ingest.stackradar.com/v1/runtime-reports` with `Authorization: Bearer <ingest-key>`.
+2. The body contains `protocol_version: 1`, `reporter`, `instance`, `deployment`, `runtime`, `platform`, and `packages` metadata. A collected inventory names `packages.ecosystem: composer` and its 64-character lowercase `inventory_hash`; it never includes the list.
+3. HTTP 204 finishes the operation. Only HTTP 409 with `code: unknown_inventory` requests an upload.
+4. PUT `/v1/package-inventories/{hash}` with `protocol_version: 1`, `ecosystem`, and `packages: [{name, version}]`. HTTP 204 finishes; there is no extra POST after the upload.
 
-```json
-{
-  "schema_version": 1,
-  "observed_at": "2026-10-30T12:00:00Z",
-  "environment": "PROD",
-  "sdk": {"name": "stackradar/php", "version": "0.1.0"},
-  "context": {"instance_id": "app-1", "release": "deploy-123", "role": "web"},
-  "runtime": {
-    "php_version": "8.3.0",
-    "sapi": "fpm-fcgi",
-    "extensions": [{"name": "curl", "version": "8.3.0"}]
-  },
-  "packages": [{
-    "name": "vendor/package",
-    "version": "1.2.0.0",
-    "pretty_version": "v1.2.0",
-    "reference": "commit-reference",
-    "dev": false
-  }]
-}
+Later check-ins repeat the same POST, so an unknown inventory can be uploaded again if the server loses it. There is no gzip, inline retry, per-package request, or local outbox. Only HTTP 204 counts as success. Redirects are never followed. The shared POST/PUT network budget defaults to 2 seconds and can be configured up to 10 seconds through `Client`.
+
+`TransportException` exposes the HTTP status through `getCode()`, parsed `Retry-After` seconds (capped at seven days), the bounded machine-readable `reason`, and whether the failure occurred during `inventoryUpload`. Exception messages omit credentials, URLs and response bodies. The transport reads at most 16 KiB of a response to extract its error code, discarding the remainder.
+
+`HttpTransport` accepts an optional origin override for tests. HTTPS is required except HTTP on loopback. Implement `StackRadar\Transport::send($method, $path, $payload, $timeout)` to replace delivery; custom transports must obey the remaining timeout supplied by the client.
+
+## Inventory and runtime data
+
+The collector reads `Composer\InstalledVersions` without running Composer or reading lockfile contents. It excludes root applications and virtual/provided entries without concrete versions, includes installed dev dependencies and metapackages, and preserves distinct name/version pairs across autoloaders. The wire version is Composer's display version, falling back to its normalized version. Hashing does not normalize either string.
+
+The v1 API carries only name/version pairs. References and dev flags are omitted, and different commits of the same `dev-main` version cannot be distinguished by this protocol. No synthetic commit suffix is added to versions. Installed metadata establishes presence, not execution, reachability, or file integrity.
+
+The hash is SHA-256 over these exact bytes:
+
+```text
+stackradar-inventory-v1\n
+{ecosystem}\n
+{name}\t{version}\n
+...
 ```
 
-The package collector reads `Composer\InstalledVersions`, includes installed development dependencies and metapackages, and excludes each dataset's root application and virtual/replaced entries without a concrete version. It preserves display versions, normalized versions, references and dev flags. Identical observations are deduplicated; conflicting observations from multiple autoloaders remain separate. Package and extension order is deterministic.
+In the example, `\n` and `\t` denote newline and tab bytes. Each name/version line is unique and sorted by byte order. There is a final newline after every package. No case folding, whitespace trimming, or JSON serialization participates in the hash. Tests pin the landed server's reference vector.
 
-No source files, install paths, environment dumps, request data, hostname, or dependency graph are collected. The project token is sent only in the `Authorization: Bearer ...` header. Caller-supplied context is transmitted as provided; do not include secrets.
+Lists exceeding 10,000 entries or a 1 MiB serialized request are rejected locally, never truncated. Package fields must be 1–255 Unicode characters without control characters. Empty complete inventories are valid.
 
-This is installed-package metadata observed from a running process, not evidence that every package was loaded or executed. Long-lived processes can retain old Composer metadata; restart workers on deployment. This SDK does not reconstruct the dependency graph from `composer.lock`.
-
-## Delivery
-
-- HTTP POST to the exact configured URL; no default API address is assumed.
-- HTTPS required, except HTTP on loopback for local development.
-- Total request timeout defaults to 2 seconds, configurable up to 10 seconds.
-- Any 2xx response means accepted. Redirects are not followed.
-- Network errors and other HTTP statuses throw `TransportException`; response bodies and credentials are excluded from exception messages.
-- `TransportException::$retryAfter` contains parsed `Retry-After` seconds or an HTTP date, capped at seven days. The caller owns retry scheduling.
-- Response bodies are discarded, and the SDK does not buffer failed reports or retry inline. A caller can collect a fresh snapshot on a later attempt; delivery is best effort and duplicates are possible.
-
-Implement the small `StackRadar\Transport` interface to adapt authentication, JSON delivery, or testing to the eventual API. The SDK performs no HTTP client discovery and installs no other production PHP packages.
+Runtime metadata contains `name: php`, `versions.php`, up to 199 loaded extension version entries named `ext-<name>`, and SAPI. Platform metadata includes OS family, architecture and OS release. No hostnames, absolute paths, file contents, environment dumps, process arguments or dependency graph are sent. Caller-supplied context must not contain secrets.
 
 ## Development
 
@@ -84,4 +81,4 @@ composer install
 composer check
 ```
 
-Tests make no external API calls. HTTP transport tests start a local PHP HTTP server and require loopback sockets and `proc_open`. Pint and PHPStan are development dependencies. The library lockfile is intentionally untracked. No remote repository or release has been created. License metadata remains proprietary pending a distribution decision.
+Tests use fake transports and a local HTTP fixture, with no external API calls. The HTTP tests need loopback sockets and `proc_open`. Their fixture supports PHP to exercise the transport; it is not evidence that the current v0 server accepts PHP. The library lockfile is intentionally untracked. License metadata remains proprietary pending a distribution decision.

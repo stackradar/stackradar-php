@@ -5,56 +5,59 @@ declare(strict_types=1);
 namespace StackRadar;
 
 use InvalidArgumentException;
+use SensitiveParameter;
 
 final class HttpTransport implements Transport
 {
     public function __construct(
-        private readonly string $endpoint,
-        private readonly string $projectToken,
-        private readonly float $timeout = 2.0,
+        #[SensitiveParameter] private readonly string $ingestKey,
+        private readonly string $baseUrl = 'https://ingest.stackradar.com',
     ) {
-        $url = parse_url($endpoint);
+        $url = parse_url($baseUrl);
         $local = in_array($url['host'] ?? '', ['localhost', '127.0.0.1', '[::1]'], true);
-
-        if (! $url || empty($url['host']) || isset($url['user']) || isset($url['pass']) || isset($url['fragment'])
+        if (! $url || empty($url['host']) || isset($url['user']) || isset($url['pass'])
+            || isset($url['query']) || isset($url['fragment']) || ! in_array($url['path'] ?? '', ['', '/'], true)
             || (($url['scheme'] ?? '') !== 'https' && ! (($url['scheme'] ?? '') === 'http' && $local))) {
-            throw new InvalidArgumentException('The StackRadar endpoint must use HTTPS (HTTP is allowed on loopback).');
+            throw new InvalidArgumentException('The ingest URL must be an HTTPS origin (HTTP is allowed on loopback).');
         }
-
-        if (trim($projectToken) === '' || strpbrk($projectToken, "\r\n") !== false) {
-            throw new InvalidArgumentException('A valid StackRadar project token is required.');
-        }
-
-        if (! is_finite($timeout) || $timeout <= 0 || $timeout > 10) {
-            throw new InvalidArgumentException('The StackRadar timeout must be greater than zero and at most 10 seconds.');
+        if (trim($ingestKey) === '' || strpbrk($ingestKey, "\r\n") !== false) {
+            throw new InvalidArgumentException('A valid StackRadar Ingest Key is required.');
         }
     }
 
-    public function send(array $payload): void
+    public function send(string $method, string $path, array $payload, float $timeout = 2.0): void
     {
+        if (! in_array($method, ['POST', 'PUT'], true) || ! str_starts_with($path, '/v1/') || str_contains($path, '?')
+            || ! is_finite($timeout) || $timeout <= 0 || $timeout > 10) {
+            throw new InvalidArgumentException('Invalid ingest request or timeout.');
+        }
         $body = json_encode($payload, JSON_THROW_ON_ERROR);
-        $handle = curl_init($this->endpoint);
-        $retryAfter = null;
-
+        if (strlen($body) > 1048576) {
+            throw new TransportException('The StackRadar request exceeds 1 MiB.', 413, reason: 'payload_too_large');
+        }
+        $handle = curl_init(rtrim($this->baseUrl, '/').$path);
         if ($handle === false) {
             throw new TransportException('Unable to initialise the StackRadar transport.');
         }
-
+        $retryAfter = null;
+        $response = '';
         curl_setopt_array($handle, [
-            CURLOPT_POST => true,
+            CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_POSTFIELDS => $body,
             CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer '.$this->projectToken,
-                'Content-Type: application/json',
-                'Accept: application/json',
-                'Expect:',
+                'Authorization: Bearer '.$this->ingestKey,
+                'Content-Type: application/json', 'Accept: application/json', 'Expect:',
             ],
             CURLOPT_USERAGENT => 'stackradar/php',
-            CURLOPT_CONNECTTIMEOUT_MS => (int) ceil($this->timeout * 1000),
-            CURLOPT_TIMEOUT_MS => (int) ceil($this->timeout * 1000),
+            CURLOPT_CONNECTTIMEOUT_MS => (int) ceil($timeout * 1000),
+            CURLOPT_TIMEOUT_MS => (int) ceil($timeout * 1000),
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_WRITEFUNCTION => static fn ($curl, string $data): int => strlen($data),
+            CURLOPT_WRITEFUNCTION => static function ($curl, string $data) use (&$response): int {
+                $response .= substr($data, 0, max(0, 16384 - strlen($response)));
+
+                return strlen($data);
+            },
             CURLOPT_HEADERFUNCTION => static function ($curl, string $header) use (&$retryAfter): int {
                 if (stripos($header, 'Retry-After:') === 0) {
                     $value = trim(substr($header, 12));
@@ -66,16 +69,15 @@ final class HttpTransport implements Transport
                 return strlen($header);
             },
         ]);
-
         if (curl_exec($handle) === false) {
-            // Do not include the URL, token, response body or curl error text in exceptions.
             throw new TransportException('The StackRadar upload failed (network or timeout).');
         }
-
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-
-        if ($status < 200 || $status >= 300) {
-            throw new TransportException('StackRadar did not accept the report (HTTP '.$status.').', $status, $retryAfter);
+        if ($status !== 204) {
+            $decoded = json_decode($response, true);
+            $reason = is_array($decoded) && is_string($decoded['code'] ?? null)
+                && preg_match('/\A[a-z0-9_]{1,100}\z/', $decoded['code']) === 1 ? $decoded['code'] : null;
+            throw new TransportException('StackRadar did not accept the request (HTTP '.$status.').', $status, $retryAfter, $reason);
         }
     }
 }

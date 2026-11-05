@@ -46,17 +46,19 @@ final class InventoryTest extends TestCase
         self::assertStringNotContainsString('/private/path', json_encode($packages, JSON_THROW_ON_ERROR));
     }
 
-    public function test_it_observes_the_current_runtime_and_installed_development_dependencies(): void
+    public function test_it_observes_the_current_runtime_and_installed_packages(): void
     {
-        $inventory = (new Inventory)->collect();
-
-        self::assertSame(PHP_VERSION, $inventory['runtime']['php_version']);
-        self::assertSame(PHP_SAPI, $inventory['runtime']['sapi']);
-        $extensions = array_column($inventory['runtime']['extensions'], 'version', 'name');
-        self::assertArrayHasKey('curl', $extensions);
-        self::assertSame(phpversion('curl'), $extensions['curl']);
-        $packages = array_column($inventory['packages'], null, 'name');
-        self::assertTrue($packages['phpunit/phpunit']['dev']);
+        $collector = new Inventory;
+        $runtime = $collector->runtime();
+        self::assertSame('php', $runtime['name']);
+        self::assertSame(PHP_VERSION, $runtime['versions']['php']);
+        self::assertSame(PHP_SAPI, $runtime['sapi']);
+        self::assertSame(phpversion('curl'), $runtime['versions']['ext-curl']);
+        $inventory = $collector->collect();
+        self::assertSame('composer', $inventory->ecosystem);
+        $packages = array_column($inventory->packages, null, 'name');
+        self::assertArrayHasKey('phpunit/phpunit', $packages);
         self::assertArrayNotHasKey('stackradar/php', $packages);
+        self::assertSame(['name', 'version'], array_keys($packages['phpunit/phpunit']));
     }
 }
