@@ -1,0 +1,25 @@
+{
+    "name": "stackradar/php",
+    "description": "Report installed Composer dependencies and PHP runtime information to StackRadar.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "require": {
+        "php": "^8.2",
+        "composer-runtime-api": "^2.1",
+        "ext-curl": "*"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.0",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^10.5 || ^11.5"
+    },
+    "autoload": {"psr-4": {"StackRadar\\": "src/"}},
+    "autoload-dev": {"psr-4": {"StackRadar\\Tests\\": "tests/"}},
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=512M",
+        "format": "pint",
+        "check": ["pint --test", "@analyse", "@test"]
+    },
+    "config": {"sort-packages": true}
+}
