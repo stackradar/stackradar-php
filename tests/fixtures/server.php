@@ -8,7 +8,7 @@ file_put_contents(getenv('STACKRADAR_TEST_CAPTURE'), json_encode([
 ]).PHP_EOL, FILE_APPEND | LOCK_EX);
 
 $path = substr(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), 3);
-// A protocol transport fixture; production v0 still rejects PHP/Composer enums.
+// A protocol transport fixture; server contract validation is exercised separately.
 if ($path === '/runtime-reports') {
     $body = json_decode(file_get_contents('php://input'), true);
     $hash = $body['packages']['inventory_hash'] ?? null;

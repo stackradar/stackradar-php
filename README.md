@@ -4,9 +4,11 @@ Collect installed Composer packages and report PHP runtime observations using St
 
 ## Server compatibility
 
-This adapter targets `stackradar/v0` main at `a69ddbb` (2026-11-05). **That server currently accepts only Node/Bun/Deno and npm. It rejects PHP/Composer with HTTP 422, and its snapshot processor handles npm only.** PHP support requires the runtime/ecosystem allowlists and snapshot package identity handling to be extended in v0. This SDK sends truthful `php` / `composer` values and does not bypass the feature toggle.
+Runtime Ingest v1 accepts PHP runtime reports and Composer inventories. The SDK sends `runtime.name: php`, `runtime.versions.php`, and `packages.ecosystem: composer`. Composer display versions are preserved so deployed packages use the same identity as repository lockfile packages.
 
-A local check against the actual v0 validator confirmed that `runtime.name` and `packages.ecosystem` are the only rejected fields in a generated PHP report. The actual server hash implementation also matched this SDK for npm, Composer and empty inventories. This is protocol compatibility work, not an end-to-end PHP ingestion release. No production request or feature-toggle change was made.
+Compatibility was checked against the PHP/Composer server implementation merged in v0 PR #784 (`4eb7d27`). Generated reports for installed packages, empty inventories, conflicting package versions and collection failures pass the server validator. Inventory hashes match the server implementation, and its package identity retains versions such as `v11.31.0` unchanged. Local HTTP tests cover the POST → 409 → PUT → 204 flow and subsequent check-ins. These checks do not contact the production endpoint.
+
+A valid Project Ingest Key and runtime reporting enabled for the organization are still required; SDK compatibility does not bypass authentication or the feature toggle. Deployed snapshots remain separate from repository exposure state.
 
 The packages remain unpublished. The previous prototype's single full-snapshot POST and `project_token`/`endpoint` configuration have been replaced by the landed protocol.
 
@@ -81,4 +83,4 @@ composer install
 composer check
 ```
 
-Tests use fake transports and a local HTTP fixture, with no external API calls. The HTTP tests need loopback sockets and `proc_open`. Their fixture supports PHP to exercise the transport; it is not evidence that the current v0 server accepts PHP. The library lockfile is intentionally untracked. License metadata remains proprietary pending a distribution decision.
+Tests use fake transports and a local HTTP fixture, with no external API calls. The HTTP tests need loopback sockets and `proc_open`. The HTTP fixture verifies delivery behavior; server contract validation is described above. The library lockfile is intentionally untracked. License metadata remains proprietary pending a distribution decision.
