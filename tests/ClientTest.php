@@ -145,6 +145,21 @@ final class ClientTest extends TestCase
         self::assertSame('unknown', $transport->calls[0]['payload']['reporter']['version']);
     }
 
+    public function test_a_framework_reporter_uses_its_own_package_version(): void
+    {
+        $original = InstalledVersions::getAllRawData()[0];
+        $data = $original;
+        $data['versions']['stackradar/laravel'] = ['version' => '0.1.2.0', 'pretty_version' => 'v0.1.2'];
+        $transport = new RecordingTransport;
+        try {
+            InstalledVersions::reload($data);
+            (new Client($transport, reporterName: 'stackradar/laravel'))->report(self::CONTEXT, null);
+        } finally {
+            InstalledVersions::reload($original);
+        }
+        self::assertSame(['name' => 'stackradar/laravel', 'version' => 'v0.1.2'], $transport->calls[0]['payload']['reporter']);
+    }
+
     public function test_an_exhausted_budget_does_not_start_a_second_network_request(): void
     {
         $transport = new RecordingTransport;

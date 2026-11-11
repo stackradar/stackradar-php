@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace StackRadar;
 
 use Composer\InstalledVersions;
-use InvalidArgumentException;
 use OutOfBoundsException;
 use Throwable;
 
@@ -15,9 +14,10 @@ final class Client
         private readonly Transport $transport,
         private readonly Inventory $inventory = new Inventory,
         private readonly float $timeout = 2.0,
+        private readonly string $reporterName = 'stackradar/php',
     ) {
         if (! is_finite($timeout) || $timeout <= 0 || $timeout > 10) {
-            throw new InvalidArgumentException('The reporting timeout must be greater than zero and at most 10 seconds.');
+            throw new ConfigurationException('The reporting timeout must be greater than zero and at most 10 seconds.', 'invalid_timeout');
         }
     }
 
@@ -58,7 +58,7 @@ final class Client
         $payload = [
             'protocol_version' => 1,
             'reporter' => [
-                'name' => 'stackradar/php',
+                'name' => $this->reporterName,
                 'version' => $this->reporterVersion(),
             ],
             'instance' => $context['instance'],
@@ -109,7 +109,7 @@ final class Client
     private function reporterVersion(): string
     {
         try {
-            return InstalledVersions::getPrettyVersion('stackradar/php') ?? 'unknown';
+            return InstalledVersions::getPrettyVersion($this->reporterName) ?? 'unknown';
         } catch (OutOfBoundsException) {
             return 'unknown';
         }

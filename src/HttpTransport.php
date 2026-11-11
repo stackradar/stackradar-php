@@ -23,10 +23,10 @@ final class HttpTransport implements Transport
         if (! $url || empty($url['host']) || isset($url['user']) || isset($url['pass'])
             || isset($url['query']) || isset($url['fragment']) || ! in_array($url['path'] ?? '', ['', '/'], true)
             || (($url['scheme'] ?? '') !== 'https' && ! (($url['scheme'] ?? '') === 'http' && $local))) {
-            throw new InvalidArgumentException('The ingest URL must be an HTTPS origin (HTTP is allowed on loopback).');
+            throw new ConfigurationException('The ingest URL must be an HTTPS origin (HTTP is allowed on loopback).', 'invalid_ingest_url');
         }
         if (trim($ingestKey) === '' || strpbrk($ingestKey, "\r\n") !== false) {
-            throw new InvalidArgumentException('A valid StackRadar Ingest Key is required.');
+            throw new ConfigurationException('A valid StackRadar Ingest Key is required.', 'invalid_ingest_key');
         }
         $this->ingestKey = new SensitiveParameterValue($ingestKey);
     }
