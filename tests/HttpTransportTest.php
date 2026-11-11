@@ -116,6 +116,19 @@ final class HttpTransportTest extends TestCase
         self::assertStringContainsString('[redacted]', $dump);
     }
 
+    public function test_export_and_serialization_cannot_reveal_the_key(): void
+    {
+        $transport = new HttpTransport('sr_ingest_SECRET123', self::$endpoint);
+        self::assertStringNotContainsString('sr_ingest_SECRET123', var_export($transport, true));
+        self::assertStringNotContainsString('sr_ingest_SECRET123', print_r($transport, true));
+        try {
+            serialize($transport);
+            self::fail('Serializing a secret-bearing transport must fail.');
+        } catch (\Exception $exception) {
+            self::assertStringNotContainsString('sr_ingest_SECRET123', $exception->getMessage());
+        }
+    }
+
     #[DataProvider('retryHeaders')]
     public function test_retry_after_accepts_http_dates_but_not_relative_phrases(string $route, ?int $expected): void
     {

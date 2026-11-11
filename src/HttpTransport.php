@@ -8,11 +8,14 @@ use DateTimeImmutable;
 use DateTimeZone;
 use InvalidArgumentException;
 use SensitiveParameter;
+use SensitiveParameterValue;
 
 final class HttpTransport implements Transport
 {
+    private readonly SensitiveParameterValue $ingestKey;
+
     public function __construct(
-        #[SensitiveParameter] private readonly string $ingestKey,
+        #[SensitiveParameter] string $ingestKey,
         private readonly string $baseUrl = 'https://ingest.stackradar.com',
     ) {
         $url = parse_url($baseUrl);
@@ -25,6 +28,7 @@ final class HttpTransport implements Transport
         if (trim($ingestKey) === '' || strpbrk($ingestKey, "\r\n") !== false) {
             throw new InvalidArgumentException('A valid StackRadar Ingest Key is required.');
         }
+        $this->ingestKey = new SensitiveParameterValue($ingestKey);
     }
 
     /** @return array{ingestKey: string, baseUrl: string} */
@@ -53,7 +57,7 @@ final class HttpTransport implements Transport
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_POSTFIELDS => $body,
             CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer '.$this->ingestKey,
+                'Authorization: Bearer '.$this->ingestKey->getValue(),
                 'Content-Type: application/json', 'Accept: application/json', 'Expect:',
             ],
             CURLOPT_USERAGENT => 'stackradar/php',
