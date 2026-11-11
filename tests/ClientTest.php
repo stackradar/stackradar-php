@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace StackRadar\Tests;
 
+use Composer\Autoload\ClassLoader;
+use Composer\InstalledVersions;
+use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use StackRadar\Client;
+use StackRadar\HttpTransport;
 use StackRadar\Inventory;
 use StackRadar\PackageInventory;
+use StackRadar\Transport;
 use StackRadar\TransportException;
 
 final class ClientTest extends TestCase
@@ -89,6 +94,55 @@ final class ClientTest extends TestCase
             self::assertTrue($exception->inventoryUpload);
             self::assertSame('inventory_hash_mismatch', $exception->reason);
         }
+    }
+
+    public function test_invalid_utf8_does_not_escape_the_report_exception_contract(): void
+    {
+        $context = self::CONTEXT;
+        $context['deployment']['service'] = "bad\xB1utf8";
+        try {
+            (new Client(new HttpTransport('test-key', 'http://127.0.0.1:1')))->report($context, null);
+            self::fail('Expected safe preparation failure.');
+        } catch (TransportException $exception) {
+            self::assertSame('report_failed', $exception->reason);
+            self::assertStringNotContainsString('bad', $exception->getMessage());
+        }
+    }
+
+    public function test_unexpected_transport_exceptions_are_wrapped_without_their_messages(): void
+    {
+        $transport = $this->createMock(Transport::class);
+        $transport->method('send')->willThrowException(new InvalidArgumentException('Secret detail'));
+        try {
+            (new Client($transport))->report(self::CONTEXT, null);
+            self::fail('Expected safe report failure.');
+        } catch (TransportException $exception) {
+            self::assertSame('report_failed', $exception->reason);
+            self::assertStringNotContainsString('Secret', $exception->getMessage());
+        }
+    }
+
+    public function test_reporter_version_is_unknown_if_the_sdk_is_not_registered_with_composer(): void
+    {
+        $original = InstalledVersions::getAllRawData()[0];
+        $data = $original;
+        $data['versions'] = [];
+        $transport = new RecordingTransport;
+        $client = new Client($transport);
+        $loaders = ClassLoader::getRegisteredLoaders();
+        try {
+            foreach ($loaders as $loader) {
+                $loader->unregister();
+            }
+            InstalledVersions::reload($data);
+            $client->report(self::CONTEXT, null);
+        } finally {
+            foreach ($loaders as $loader) {
+                $loader->register();
+            }
+            InstalledVersions::reload($original);
+        }
+        self::assertSame('unknown', $transport->calls[0]['payload']['reporter']['version']);
     }
 
     public function test_an_exhausted_budget_does_not_start_a_second_network_request(): void

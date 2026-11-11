@@ -107,6 +107,36 @@ final class HttpTransportTest extends TestCase
         }
     }
 
+    public function test_a_debug_dump_does_not_reveal_the_key(): void
+    {
+        ob_start();
+        var_dump(new HttpTransport('secret-ingest-key', self::$endpoint));
+        $dump = ob_get_clean();
+        self::assertStringNotContainsString('secret-ingest-key', $dump);
+        self::assertStringContainsString('[redacted]', $dump);
+    }
+
+    #[DataProvider('retryHeaders')]
+    public function test_retry_after_accepts_http_dates_but_not_relative_phrases(string $route, ?int $expected): void
+    {
+        try {
+            (new HttpTransport('test-key', self::$endpoint))->send('POST', '/v1/'.$route, []);
+            self::fail('Expected rate limit.');
+        } catch (TransportException $exception) {
+            if ($expected === 120) {
+                self::assertGreaterThanOrEqual(118, $exception->retryAfter);
+                self::assertLessThanOrEqual(120, $exception->retryAfter);
+            } else {
+                self::assertSame($expected, $exception->retryAfter);
+            }
+        }
+    }
+
+    public static function retryHeaders(): array
+    {
+        return [['relative-retry', null], ['zero-retry', 0], ['legacy-retry', 120], ['asctime-retry', 120], ['asctime-past-retry', 0]];
+    }
+
     public function test_it_bounds_network_time(): void
     {
         $started = microtime(true);

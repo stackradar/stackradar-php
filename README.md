@@ -20,27 +20,31 @@ After publishing, install `stackradar/php`. Configure an Ingest Key issued for t
 use StackRadar\Client;
 use StackRadar\HttpTransport;
 
-$client = new Client(new HttpTransport(
-    ingestKey: getenv('STACKRADAR_INGEST_KEY'),
-));
-$inventory = $client->collectInventory();
+try {
+    $client = new Client(new HttpTransport(
+        ingestKey: getenv('STACKRADAR_INGEST_KEY'),
+    ));
+    $inventory = $client->collectInventory();
 
-$context = [
-    'instance' => [
-        'id' => '0192f8c4-7b1e-7c3a-9d2e-4f5a6b7c8d9e', // Your persisted reporter UUID.
-        'started_at' => '2026-11-05T12:00:00Z',
-    ],
-    'deployment' => [
-        'environment' => 'PROD', // null is accepted by the protocol.
-        'service' => 'api',
-        'release' => ['value' => 'deploy-123', 'source' => 'config'],
-        'artifact' => null,
-    ],
-];
-$client->report($context, $inventory);
+    $context = [
+        'instance' => [
+            'id' => '0192f8c4-7b1e-7c3a-9d2e-4f5a6b7c8d9e', // Your persisted reporter UUID.
+            'started_at' => '2026-11-05T12:00:00Z',
+        ],
+        'deployment' => [
+            'environment' => 'PROD', // null is accepted by the protocol.
+            'service' => 'api',
+            'release' => ['value' => 'deploy-123', 'source' => 'config'],
+            'artifact' => null,
+        ],
+    ];
+    $client->report($context, $inventory);
+} catch (\Throwable) {
+    // Telemetry must not interrupt the application.
+}
 ```
 
-Reuse the inventory and instance identity for later check-ins. Call `collectInventory()` again when the installation changes. The generic SDK does not create timers, caches, shutdown hooks, or disk queues; callers own scheduling and response policy. Pass `null` instead of an inventory, with an optional list of `['code' => '...']` errors, to report collection failure without a partial list.
+Reuse the inventory and instance identity for later check-ins. Create a new client/collector after the installation changes. The collector snapshots loaded Composer metadata once, so fingerprinting and package collection stay consistent in a long-lived process. The generic SDK does not create timers, caches, shutdown hooks, or disk queues; callers own scheduling and response policy. Pass `null` instead of an inventory, with an optional list of `['code' => '...']` errors, to report collection failure without a partial list.
 
 ## Wire behavior
 
@@ -51,7 +55,9 @@ Reuse the inventory and instance identity for later check-ins. Call `collectInve
 
 Later check-ins repeat the same POST, so an unknown inventory can be uploaded again if the server loses it. There is no gzip, inline retry, per-package request, or local outbox. Only HTTP 204 counts as success. Redirects are never followed. The shared POST/PUT network budget defaults to 2 seconds and can be configured up to 10 seconds through `Client`.
 
-`TransportException` exposes the HTTP status through `getCode()`, parsed `Retry-After` seconds (capped at seven days), the bounded machine-readable `reason`, and whether the failure occurred during `inventoryUpload`. Exception messages omit credentials, URLs and response bodies. The transport reads at most 16 KiB of a response to extract its error code, discarding the remainder.
+`Client::report()` wraps preparation, serialization and delivery failures in `TransportException`. Missing Composer metadata for the SDK version is reported as `unknown`. Constructors and explicit inventory collection can still throw argument or collection exceptions; the example guards the entire reporting operation.
+
+`TransportException` exposes the HTTP status through `getCode()`, parsed `Retry-After` seconds or strict HTTP dates (capped at seven days; relative phrases are ignored), the bounded machine-readable `reason`, and whether the failure occurred during `inventoryUpload`. Exception messages omit credentials, URLs and response bodies. Debug dumps of the HTTP transport redact the Ingest Key. The transport reads at most 16 KiB of a response to extract its error code, discarding the remainder.
 
 `HttpTransport` accepts an optional origin override for tests. HTTPS is required except HTTP on loopback. Implement `StackRadar\Transport::send($method, $path, $payload, $timeout)` to replace delivery; custom transports must obey the remaining timeout supplied by the client.
 
@@ -83,4 +89,4 @@ composer install
 composer check
 ```
 
-Tests use fake transports and a local HTTP fixture, with no external API calls. The HTTP tests need loopback sockets and `proc_open`. The HTTP fixture verifies delivery behavior; server contract validation is described above. The library lockfile is intentionally untracked. License metadata remains proprietary pending a distribution decision.
+Tests use fake transports and a local HTTP fixture, with no external API calls. The HTTP tests need loopback sockets and `proc_open`. The HTTP fixture verifies delivery behavior; server contract validation is described above. Distribution archives exclude tests, fixtures, local development scripts and analysis/test configuration via `.gitattributes`; source checkouts retain those files. The library lockfile is intentionally untracked. License metadata remains proprietary pending a distribution decision.

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace StackRadar\Tests;
 
+use Composer\InstalledVersions;
 use PHPUnit\Framework\TestCase;
 use StackRadar\ComposerPackages;
 use StackRadar\Inventory;
@@ -44,6 +45,27 @@ final class InventoryTest extends TestCase
         self::assertSame('v1.2.0', $packages[2]['pretty_version']);
         self::assertSame('commit-a', $packages[2]['reference']);
         self::assertStringNotContainsString('/private/path', json_encode($packages, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_the_loaded_metadata_fingerprint_and_collection_remain_consistent(): void
+    {
+        $original = InstalledVersions::getAllRawData()[0];
+        $data = $original;
+        $data['versions'] = ['vendor/package' => ['version' => '1.0.0.0', 'pretty_version' => '1.0.0']];
+        try {
+            InstalledVersions::reload($data);
+            $old = new Inventory;
+            $fingerprint = $old->fingerprint();
+            $data['versions']['vendor/package']['pretty_version'] = '2.0.0';
+            InstalledVersions::reload($data);
+            self::assertSame($fingerprint, $old->fingerprint());
+            self::assertSame('1.0.0', array_column($old->collect()->packages, 'version', 'name')['vendor/package']);
+            $fresh = new Inventory;
+            self::assertNotSame($fingerprint, $fresh->fingerprint());
+            self::assertSame('2.0.0', array_column($fresh->collect()->packages, 'version', 'name')['vendor/package']);
+        } finally {
+            InstalledVersions::reload($original);
+        }
     }
 
     public function test_it_observes_the_current_runtime_and_installed_packages(): void

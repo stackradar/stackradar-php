@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace StackRadar;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use InvalidArgumentException;
 use SensitiveParameter;
 
@@ -23,6 +25,12 @@ final class HttpTransport implements Transport
         if (trim($ingestKey) === '' || strpbrk($ingestKey, "\r\n") !== false) {
             throw new InvalidArgumentException('A valid StackRadar Ingest Key is required.');
         }
+    }
+
+    /** @return array{ingestKey: string, baseUrl: string} */
+    public function __debugInfo(): array
+    {
+        return ['ingestKey' => '[redacted]', 'baseUrl' => $this->baseUrl];
     }
 
     public function send(string $method, string $path, array $payload, float $timeout = 2.0): void
@@ -61,9 +69,7 @@ final class HttpTransport implements Transport
             CURLOPT_HEADERFUNCTION => static function ($curl, string $header) use (&$retryAfter): int {
                 if (stripos($header, 'Retry-After:') === 0) {
                     $value = trim(substr($header, 12));
-                    $date = strtotime($value);
-                    $retryAfter = ctype_digit($value) ? min((int) $value, 604800)
-                        : ($date === false ? null : max(0, min($date - time(), 604800)));
+                    $retryAfter = self::retryAfter($value);
                 }
 
                 return strlen($header);
@@ -79,5 +85,24 @@ final class HttpTransport implements Transport
                 && preg_match('/\A[a-z0-9_]{1,100}\z/', $decoded['code']) === 1 ? $decoded['code'] : null;
             throw new TransportException('StackRadar did not accept the request (HTTP '.$status.').', $status, $retryAfter, $reason);
         }
+    }
+
+    private static function retryAfter(string $value): ?int
+    {
+        if (ctype_digit($value)) {
+            return min((int) $value, 604800);
+        }
+        if (preg_match('/[\x00-\x1f\x7f]/', $value) === 1) {
+            return null;
+        }
+        foreach (['D, d M Y H:i:s \\G\\M\\T', 'l, d-M-y H:i:s \\G\\M\\T', 'D M j H:i:s Y'] as $format) {
+            $input = $format === 'D M j H:i:s Y' ? str_replace('  ', ' ', $value) : $value;
+            $date = DateTimeImmutable::createFromFormat('!'.$format, $input, new DateTimeZone('UTC'));
+            if ($date !== false && $date->format($format) === $input) {
+                return max(0, min($date->getTimestamp() - time(), 604800));
+            }
+        }
+
+        return null;
     }
 }

@@ -6,6 +6,8 @@ namespace StackRadar;
 
 use Composer\InstalledVersions;
 use InvalidArgumentException;
+use OutOfBoundsException;
+use Throwable;
 
 final class Client
 {
@@ -24,18 +26,40 @@ final class Client
         return $this->inventory->collect();
     }
 
+    public function inventoryFingerprint(): string
+    {
+        return $this->inventory->fingerprint();
+    }
+
+    /**
+     * @param  array{instance: array{id: string, started_at: string}, deployment: array<string, mixed>}  $context
+     * @param  list<array{code: string}>  $errors
+     *
+     * @throws TransportException when preparation or delivery fails
+     */
+    public function report(array $context, ?PackageInventory $packages, array $errors = []): void
+    {
+        try {
+            $this->sendReport($context, $packages, $errors);
+        } catch (TransportException $exception) {
+            throw $exception;
+        } catch (Throwable) {
+            throw new TransportException('Unable to prepare or send the StackRadar report.', reason: 'report_failed');
+        }
+    }
+
     /**
      * @param  array{instance: array{id: string, started_at: string}, deployment: array<string, mixed>}  $context
      * @param  list<array{code: string}>  $errors
      */
-    public function report(array $context, ?PackageInventory $packages, array $errors = []): void
+    private function sendReport(array $context, ?PackageInventory $packages, array $errors): void
     {
         $deadline = microtime(true) + $this->timeout;
         $payload = [
             'protocol_version' => 1,
             'reporter' => [
                 'name' => 'stackradar/php',
-                'version' => InstalledVersions::getPrettyVersion('stackradar/php') ?? 'unknown',
+                'version' => $this->reporterVersion(),
             ],
             'instance' => $context['instance'],
             'deployment' => $context['deployment'],
@@ -79,6 +103,15 @@ final class Client
                 $exception->getMessage(), $exception->getCode(), $exception->retryAfter,
                 $exception->reason, inventoryUpload: true,
             );
+        }
+    }
+
+    private function reporterVersion(): string
+    {
+        try {
+            return InstalledVersions::getPrettyVersion('stackradar/php') ?? 'unknown';
+        } catch (OutOfBoundsException) {
+            return 'unknown';
         }
     }
 }

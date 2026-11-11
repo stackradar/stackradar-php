@@ -1,5 +1,12 @@
 <?php
 
+$capture = getenv('STACKRADAR_TEST_CAPTURE');
+if (PHP_SAPI !== 'cli-server' || ! is_string($capture) || $capture === '') {
+    http_response_code(404);
+
+    return;
+}
+
 file_put_contents(getenv('STACKRADAR_TEST_CAPTURE'), json_encode([
     'uri' => $_SERVER['REQUEST_URI'],
     'method' => $_SERVER['REQUEST_METHOD'],
@@ -44,6 +51,26 @@ switch ($path) {
     case '/date-retry':
         header('Retry-After: '.gmdate('D, d M Y H:i:s', time() + 120).' GMT');
         http_response_code(503);
+        break;
+    case '/relative-retry':
+        header('Retry-After: next week');
+        http_response_code(429);
+        break;
+    case '/zero-retry':
+        header('Retry-After: 0');
+        http_response_code(429);
+        break;
+    case '/legacy-retry':
+        header('Retry-After: '.gmdate('l, d-M-y H:i:s', time() + 120).' GMT');
+        http_response_code(429);
+        break;
+    case '/asctime-retry':
+        header('Retry-After: '.gmdate('D M j H:i:s Y', time() + 120));
+        http_response_code(429);
+        break;
+    case '/asctime-past-retry':
+        header('Retry-After: Sun Nov  6 08:49:37 1994');
+        http_response_code(429);
         break;
     case '/slow':
         usleep(300000);
