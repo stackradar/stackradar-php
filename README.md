@@ -6,12 +6,8 @@ Requires PHP 8.2+, Composer 2.1+, and cURL.
 
 ## Install
 
-The package is private and unreleased. Authenticate with a read-only GitHub token, then install the development branch:
-
 ```bash
-composer config --global --auth github-oauth.github.com "$STACKRADAR_PACKAGES_TOKEN"
-composer config repositories.stackradar-php vcs https://github.com/stackradar/php-sdk
-composer require 'stackradar/php:dev-runtime-ingest-v1'
+composer require stackradar/php
 ```
 
 ## Usage
