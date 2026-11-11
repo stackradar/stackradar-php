@@ -2,7 +2,7 @@
     "name": "stackradar/php",
     "description": "Report installed Composer dependencies and PHP runtime information to StackRadar.",
     "type": "library",
-    "license": "proprietary",
+    "license": "Apache-2.0",
     "require": {
         "php": "^8.2",
         "composer-runtime-api": "^2.1",

@@ -43,3 +43,7 @@ composer check
 ```
 
 Tests use fake transports and a local HTTP server; they don't call StackRadar.
+
+## License
+
+[Apache 2.0](LICENSE).
