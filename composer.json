@@ -11,7 +11,7 @@
     "require-dev": {
         "laravel/pint": "^1.0",
         "phpstan/phpstan": "^2.0",
-        "phpunit/phpunit": "^10.5 || ^11.5"
+        "phpunit/phpunit": "^10.5 || ^11.5 || ^13.0"
     },
     "autoload": {"psr-4": {"StackRadar\\": "src/"}},
     "autoload-dev": {"psr-4": {"StackRadar\\Tests\\": "tests/"}},
